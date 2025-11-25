@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wmic datafile where name=\"C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe\" get Version 2)",
+      "Bash(nul)",
+      "Bash(python test_ocr.py:*)",
+      "Bash(py test_ocr.py:*)",
+      "Bash(python:*)",
+      "Bash(py -c:*)",
+      "Bash(py -m py_compile:*)",
+      "WebSearch",
+      "Bash(py .srcutilsmouse_sender_postmessage.py)",
+      "Bash(py src/utils/mouse_sender_postmessage.py)",
+      "Bash(py test_postmessage_debug.py)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

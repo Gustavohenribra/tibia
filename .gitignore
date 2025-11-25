@@ -1,0 +1,9 @@
+.claude
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+nul
+src/__pycache__/
+src/*.pyc
+*.log

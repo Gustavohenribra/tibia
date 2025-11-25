@@ -1,0 +1,52 @@
+{
+  "_comment": "Configuração de Skills para Knight (EK)",
+  "_instructions": "Edite hotkeys, prioridades e condições conforme necessário",
+
+  "skills": [
+    {
+      "name": "Health Potion (Emergency)",
+      "hotkey": "F1",
+      "priority": 250,
+      "cooldown": 1.5,
+      "type": "healing",
+      "conditions": {
+        "max_hp_percent": 40,
+        "description": "Usa quando HP < 40%"
+      }
+    },
+    {
+      "name": "Exura infir ico",
+      "hotkey": "F3",
+      "priority": 200,
+      "cooldown": 1.5,
+      "mana_cost": 10,
+      "type": "healing",
+      "conditions": {
+        "max_hp_percent": 80,
+        "min_mana": 40,
+        "description": "Healing spell quando HP < 80% e tem mana"
+      }
+    },
+    {
+      "name": "Mana Potion",
+      "hotkey": "F2",
+      "priority": 150,
+      "cooldown": 1.5,
+      "type": "mana",
+      "conditions": {
+        "max_mana_percent": 30,
+        "description": "Usa quando Mana < 30%"
+      }
+    }
+  ],
+
+  "global_settings": {
+    "emergency_hp_percent": 20,
+    "rest_when_mana_below_percent": 10,
+    "min_mana_for_damage_skills": 100,
+    "enable_auto_healing": true,
+    "enable_auto_mana": true,
+    "enable_auto_buffs": true,
+    "pause_rotation_when_hp_below": 30
+  }
+}

@@ -1,0 +1,215 @@
+{
+  "_comment": "Configurações Gerais do Bot",
+  "obs_camera": {
+    "device_index": 5,
+    "fallback_auto_detect": true,
+    "min_resolution_width": 1280
+  },
+  "screen_regions": {
+    "hp_bar": {
+      "x": 366,
+      "y": 2,
+      "width": 60,
+      "height": 16,
+      "_points": {
+        "top_left": {
+          "x": 366,
+          "y": 2
+        },
+        "bottom_right": {
+          "x": 426,
+          "y": 18
+        }
+      }
+    },
+    "mana_bar": {
+      "x": 1141,
+      "y": 1,
+      "width": 61,
+      "height": 17,
+      "_points": {
+        "top_left": {
+          "x": 1141,
+          "y": 1
+        },
+        "bottom_right": {
+          "x": 1202,
+          "y": 18
+        }
+      }
+    },
+    "target_hp": {
+      "x": 1743,
+      "y": 466,
+      "width": 164,
+      "height": 94,
+      "_points": {
+        "top_left": {
+          "x": 1743,
+          "y": 466
+        },
+        "bottom_right": {
+          "x": 1907,
+          "y": 560
+        }
+      }
+    }
+  },
+  "ocr_settings": {
+    "language": "eng",
+    "config": "--psm 7 -c tessedit_char_whitelist=0123456789/",
+    "threshold_min": 180,
+    "threshold_max": 255,
+    "resize_scale": 2.0,
+    "enable_preprocessing": true,
+    "enable_cache": true
+  },
+  "human_behavior": {
+    "base_delay_ms": 50,
+    "random_variance_ms": 20,
+    "distribution": "gaussian",
+    "reaction_time_min_ms": 0,
+    "reaction_time_max_ms": 100,
+    "enable_micro_pauses": true,
+    "micro_pause_chance_percent": 1
+  },
+  "key_sender": {
+    "_comment": "PostMessage funciona em segundo plano (não requer foco)",
+    "method": "PostMessage",
+    "key_press_duration_min_ms": 20,
+    "key_press_duration_max_ms": 40,
+    "delay_between_keys_ms": 5
+  },
+  "mouse_sender": {
+    "_comment": "PostMessage configurado para clicks em background (sem mover cursor)",
+    "method": "PostMessage"
+  },
+  "bot_loop": {
+    "fps_target": 120,
+    "enable_statistics": true,
+    "enable_console_output": true,
+    "log_level": "INFO"
+  },
+  "hotkeys": {
+    "toggle_bot": "F9",
+    "toggle_sentry_mode": "insert",
+    "emergency_stop": "F10"
+  },
+  "safety": {
+    "pause_on_critical_hp_percent": 15,
+    "stop_on_death": true,
+    "alert_on_low_mana_percent": 10,
+    "enable_emergency_mode": true
+  },
+  "auto_targeting": {
+    "enable": true,
+    "target_key": "space",
+    "delay_after_kill_ms": 300,
+    "delay_variance_ms": 100
+  },
+  "movement": {
+    "enable": true,
+    "pause_after_arrival_min_ms": 300,
+    "pause_after_arrival_max_ms": 800,
+    "pathfinding": {
+      "edge_check_distance": 30,
+      "history_size": 5,
+      "max_stuck_time_ms": 30000,
+      "_comment": "max_stuck_time_ms aumentado para 30000 (30s) para dar tempo ao personagem chegar em destinos mais distantes"
+    }
+  },
+  "combat": {
+    "chase_key": "k",
+    "enable_chase": true,
+    "chase_on_combat": true,
+    "loot_key": "L",
+    "enable_auto_loot": true,
+    "loot_delay_after_kill_ms": 800,
+    "random_movement_in_combat": {
+      "_comment": "Movimentos aleatórios durante combate (mais natural/humano)",
+      "enable": true,
+      "chance_percent": 15,
+      "min_interval_seconds": 3,
+      "max_interval_seconds": 8,
+      "keys": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ]
+    },
+    "chase_button": {
+      "_comment": "Coordenadas e configuração de detecção do botão chase",
+      "x1": 1892,
+      "y1": 140,
+      "x2": 1914,
+      "y2": 160,
+      "active_color_range": {
+        "_comment": "Range HSV para detectar verde (chase ativo). Use tools/calibrate_chase_button.py para calibrar",
+        "h_lower": 35,
+        "h_upper": 85,
+        "s_lower": 80,
+        "s_upper": 255,
+        "v_lower": 80,
+        "v_upper": 255
+      },
+      "active_threshold_percent": 10.0
+    }
+  },
+  "minimap": {
+    "enable": true,
+    "region": {
+      "x": 1751,
+      "y": 1,
+      "width": 112,
+      "height": 114
+    },
+    "player_center": {
+      "x": 54,
+      "y": 58
+    },
+    "check_distance_pixels": 15,
+    "safety_margin_pixels": 3,
+    "colors": {
+      "walkable": {
+        "name": "walkable",
+        "hsv_lower": [
+          5,
+          134,
+          118
+        ],
+        "hsv_upper": [
+          25,
+          194,
+          178
+        ]
+      },
+      "hole": {
+        "name": "hole",
+        "hsv_lower": [
+          13,
+          65,
+          225
+        ],
+        "hsv_upper": [
+          33,
+          125,
+          255
+        ]
+      },
+      "wall": {
+        "name": "wall",
+        "hsv_lower": [
+          0,
+          221,
+          114
+        ],
+        "hsv_upper": [
+          19,
+          255,
+          174
+        ]
+      }
+    }
+  }
+}

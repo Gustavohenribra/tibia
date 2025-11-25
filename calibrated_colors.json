@@ -1,0 +1,45 @@
+{
+  "minimap": {
+    "colors": {
+      "walkable": {
+        "name": "walkable",
+        "hsv_lower": [
+          5,
+          134,
+          118
+        ],
+        "hsv_upper": [
+          25,
+          194,
+          178
+        ]
+      },
+      "wall": {
+        "name": "wall",
+        "hsv_lower": [
+          0,
+          221,
+          114
+        ],
+        "hsv_upper": [
+          19,
+          255,
+          174
+        ]
+      },
+      "hole": {
+        "name": "hole",
+        "hsv_lower": [
+          13,
+          65,
+          225
+        ],
+        "hsv_upper": [
+          33,
+          125,
+          255
+        ]
+      }
+    }
+  }
+}
