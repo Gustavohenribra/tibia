@@ -1,5 +1,5 @@
 {
-  "_comment": "Configurações Gerais do Bot",
+  "_comment": "ConfiguraÃ§Ãµes Gerais do Bot",
   "obs_camera": {
     "device_index": 5,
     "fallback_auto_detect": true,
@@ -7,50 +7,50 @@
   },
   "screen_regions": {
     "hp_bar": {
-      "x": 366,
-      "y": 2,
-      "width": 60,
-      "height": 16,
+      "x": 499,
+      "y": 4,
+      "width": 59,
+      "height": 15,
       "_points": {
         "top_left": {
-          "x": 366,
-          "y": 2
+          "x": 499,
+          "y": 4
         },
         "bottom_right": {
-          "x": 426,
-          "y": 18
+          "x": 558,
+          "y": 19
         }
       }
     },
     "mana_bar": {
-      "x": 1141,
-      "y": 1,
-      "width": 61,
-      "height": 17,
+      "x": 1188,
+      "y": 0,
+      "width": 55,
+      "height": 18,
       "_points": {
         "top_left": {
-          "x": 1141,
-          "y": 1
+          "x": 1188,
+          "y": 0
         },
         "bottom_right": {
-          "x": 1202,
+          "x": 1243,
           "y": 18
         }
       }
     },
     "target_hp": {
-      "x": 1743,
-      "y": 466,
-      "width": 164,
-      "height": 94,
+      "x": 1744,
+      "y": 437,
+      "width": 160,
+      "height": 102,
       "_points": {
         "top_left": {
-          "x": 1743,
-          "y": 466
+          "x": 1744,
+          "y": 437
         },
         "bottom_right": {
-          "x": 1907,
-          "y": 560
+          "x": 1904,
+          "y": 539
         }
       }
     }
@@ -74,7 +74,7 @@
     "micro_pause_chance_percent": 1
   },
   "key_sender": {
-    "_comment": "PostMessage funciona em segundo plano (não requer foco)",
+    "_comment": "PostMessage funciona em segundo plano (nÃ£o requer foco)",
     "method": "PostMessage",
     "key_press_duration_min_ms": 20,
     "key_press_duration_max_ms": 40,
@@ -104,13 +104,13 @@
   "auto_targeting": {
     "enable": true,
     "target_key": "space",
-    "delay_after_kill_ms": 300,
-    "delay_variance_ms": 100
+    "delay_after_kill_ms": 100,
+    "delay_variance_ms": 50
   },
   "movement": {
     "enable": true,
-    "pause_after_arrival_min_ms": 300,
-    "pause_after_arrival_max_ms": 800,
+    "pause_after_arrival_min_ms": 100,
+    "pause_after_arrival_max_ms": 300,
     "pathfinding": {
       "edge_check_distance": 30,
       "history_size": 5,
@@ -124,9 +124,67 @@
     "chase_on_combat": true,
     "loot_key": "L",
     "enable_auto_loot": true,
-    "loot_delay_after_kill_ms": 800,
+    "loot_delay_after_kill_ms": 150,
+    "combat_halo_detection": {
+      "_comment": "Deteccao do aro por CONTORNO com cores BGR exatas. Aro = contorno grande (area >= 350)",
+      "enabled": true,
+      "min_contour_area": 350,
+      "color_tolerance": 25,
+      "bgr_colors": [
+        [
+          28,
+          14,
+          144
+        ],
+        [
+          22,
+          4,
+          166
+        ],
+        [
+          42,
+          28,
+          158
+        ],
+        [
+          55,
+          47,
+          112
+        ],
+        [
+          62,
+          54,
+          119
+        ],
+        [
+          41,
+          27,
+          157
+        ],
+        [
+          48,
+          34,
+          164
+        ],
+        [
+          57,
+          48,
+          113
+        ],
+        [
+          47,
+          33,
+          163
+        ],
+        [
+          45,
+          31,
+          160
+        ]
+      ]
+    },
     "random_movement_in_combat": {
-      "_comment": "Movimentos aleatórios durante combate (mais natural/humano)",
+      "_comment": "Movimentos aleatÃ³rios durante combate (mais natural/humano)",
       "enable": true,
       "chance_percent": 15,
       "min_interval_seconds": 3,
@@ -139,7 +197,7 @@
       ]
     },
     "chase_button": {
-      "_comment": "Coordenadas e configuração de detecção do botão chase",
+      "_comment": "Coordenadas e configuraÃ§Ã£o de detecÃ§Ã£o do botÃ£o chase",
       "x1": 1892,
       "y1": 140,
       "x2": 1914,
@@ -156,60 +214,88 @@
       "active_threshold_percent": 10.0
     }
   },
+  "skill_level": {
+    "_comment": "Configuracoes do bot de treino de skill",
+    "healing_key": "3",
+    "healing_mana_cost": 10,
+    "healing_interval_min_sec": 1.5,
+    "healing_interval_max_sec": 3.5,
+    "food_key": "9",
+    "mana_key": "2",
+    "mana_threshold_percent": 40
+  },
   "minimap": {
     "enable": true,
     "region": {
-      "x": 1751,
-      "y": 1,
-      "width": 112,
-      "height": 114
+      "x": 1753,
+      "y": 7,
+      "width": 107,
+      "height": 109
     },
     "player_center": {
       "x": 54,
-      "y": 58
+      "y": 53
     },
     "check_distance_pixels": 15,
     "safety_margin_pixels": 3,
     "colors": {
       "walkable": {
-        "name": "walkable",
-        "hsv_lower": [
-          5,
-          134,
-          118
-        ],
-        "hsv_upper": [
-          25,
-          194,
-          178
-        ]
-      },
-      "hole": {
-        "name": "hole",
-        "hsv_lower": [
-          13,
-          65,
-          225
-        ],
-        "hsv_upper": [
-          33,
-          125,
-          255
+        "bgr_colors": [
+          [
+            53,
+            101,
+            148
+          ]
         ]
       },
       "wall": {
-        "name": "wall",
-        "hsv_lower": [
-          0,
-          221,
-          114
-        ],
-        "hsv_upper": [
-          19,
-          255,
-          174
+        "bgr_colors": [
+          [
+            6,
+            47,
+            134
+          ],
+          [
+            4,
+            45,
+            139
+          ],
+          [
+            10,
+            47,
+            134
+          ],
+          [
+            2,
+            43,
+            144
+          ]
         ]
       }
+    },
+    "color_tolerance": 5
+  },
+  "potion_slots": {
+    "1": {
+      "x": 212,
+      "y": 913,
+      "width": 15,
+      "height": 12,
+      "_description": "Slot da poção na tecla 1"
+    },
+    "2": {
+      "x": 252,
+      "y": 912,
+      "width": 15,
+      "height": 14,
+      "_description": "Slot da poção na tecla 2"
+    },
+    "9": {
+      "x": 499,
+      "y": 912,
+      "width": 17,
+      "height": 14,
+      "_description": "Slot da poção na tecla 9"
     }
   }
 }

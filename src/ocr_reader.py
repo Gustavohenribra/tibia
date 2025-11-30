@@ -1,6 +1,6 @@
 """
 OCR Reader Otimizado para Tibia
-Pré-processamento avançado para precisão 99%+
+Pre-processamento avancado para precisao 99%+
 """
 
 import cv2
@@ -8,7 +8,8 @@ import numpy as np
 import pytesseract
 import re
 import os
-from typing import Optional, Tuple
+import json
+from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 
 # Configura caminho do Tesseract (caminho padrão Windows)
@@ -44,10 +45,10 @@ class OCRReader:
         Inicializa OCR Reader
 
         Args:
-            tesseract_config: Configuração do Tesseract (PSM 7 = linha única)
-            resize_scale: Escala de resize (4x para máxima precisão)
-            threshold_min: Threshold mínimo para binarização
-            threshold_max: Threshold máximo
+            tesseract_config: Configuracao do Tesseract (PSM 7 = linha unica)
+            resize_scale: Escala de resize (4x para maxima precisao)
+            threshold_min: Threshold minimo para binarizacao
+            threshold_max: Threshold maximo
             debug: Se True, salva imagens processadas para debug
         """
         self.config = tesseract_config
@@ -61,6 +62,39 @@ class OCRReader:
         self._last_hp_result = None
         self._last_mana_image = None
         self._last_mana_result = None
+
+        # Carrega configuracoes de deteccao do aro de combate
+        self._halo_config = self._load_halo_config()
+
+    def _load_halo_config(self) -> Dict[str, Any]:
+        """Carrega configuracoes de deteccao do aro de combate do bot_settings.json"""
+        default_config = {
+            "enabled": True,
+            "border_thickness": 4,
+            "border_density_threshold": 5.0,
+            "ratio_threshold": 1.5,
+            "hsv_ranges": {
+                "red1": {"h_lower": 0, "h_upper": 10, "s_lower": 100, "s_upper": 255, "v_lower": 100, "v_upper": 255},
+                "orange": {"h_lower": 10, "h_upper": 25, "s_lower": 100, "s_upper": 255, "v_lower": 100, "v_upper": 255},
+                "red2": {"h_lower": 170, "h_upper": 180, "s_lower": 100, "s_upper": 255, "v_lower": 100, "v_upper": 255}
+            }
+        }
+
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'bot_settings.json')
+            with open(config_path, 'r') as f:
+                settings = json.load(f)
+                halo_config = settings.get("combat", {}).get("combat_halo_detection", {})
+                if halo_config:
+                    # Merge com defaults
+                    for key in default_config:
+                        if key not in halo_config:
+                            halo_config[key] = default_config[key]
+                    return halo_config
+        except Exception:
+            pass
+
+        return default_config
 
     def _sharpen(self, image: np.ndarray) -> np.ndarray:
         """
@@ -385,48 +419,67 @@ class OCRReader:
 
     def detect_active_combat(self, battle_list_image: np.ndarray) -> bool:
         """
-        Detecta se está em combate ATIVO (criatura selecionada com aro)
+        Detecta se esta em combate ATIVO (criatura selecionada com aro)
 
-        Analisa TODOS os tons do aro:
-        - Vermelho (H: 0-10, 170-180)
-        - Laranja avermelhado (H: 10-20)
-        - Laranja (H: 20-30)
+        O aro de combate do Tibia forma um RETANGULO PERFEITO ao redor do
+        slot da criatura selecionada. Esta funcao detecta esse padrao usando
+        deteccao de CONTORNOS com cores BGR EXATAS (sem HSV).
 
         Args:
-            battle_list_image: Região da Battle List
+            battle_list_image: Regiao da Battle List
 
         Returns:
-            True se há aro (combate ativo)
+            True se ha aro de combate (contorno retangular) detectado
         """
         if battle_list_image is None or battle_list_image.size == 0:
             return False
 
-        # Converte para HSV
-        hsv = cv2.cvtColor(battle_list_image, cv2.COLOR_BGR2HSV)
-        total_pixels = battle_list_image.shape[0] * battle_list_image.shape[1]
+        # Carrega configuracoes
+        cfg = self._halo_config
 
-        # Detecta ARO de combate (vermelho/laranja/laranja escuro)
-        # Range expandido para cobrir todos os tons do aro
-        # Saturação e Value reduzidos para pegar variações de luminosidade
+        # Cria mascara usando cores BGR exatas (sem conversao HSV)
+        bgr_colors = cfg.get("bgr_colors", [
+            [0, 0, 255],    # Vermelho puro
+            [0, 0, 200],    # Vermelho escuro
+            [0, 50, 255],   # Vermelho-laranja
+            [0, 100, 255],  # Laranja
+            [0, 128, 255],  # Laranja claro
+            [0, 165, 255]   # Laranja amarelado
+        ])
+        tolerance = cfg.get("color_tolerance", 30)
 
-        # Vermelho puro (0-10)
-        red_mask1 = cv2.inRange(hsv, np.array([0, 60, 80]), np.array([10, 255, 255]))
+        # Cria mascara combinando todas as cores BGR
+        combat_mask = np.zeros(battle_list_image.shape[:2], dtype=np.uint8)
 
-        # Laranja avermelhado + Laranja (10-30)
-        orange_mask = cv2.inRange(hsv, np.array([10, 60, 80]), np.array([30, 255, 255]))
+        for bgr in bgr_colors:
+            lower = np.array([max(0, c - tolerance) for c in bgr], dtype=np.uint8)
+            upper = np.array([min(255, c + tolerance) for c in bgr], dtype=np.uint8)
+            color_mask = cv2.inRange(battle_list_image, lower, upper)
+            combat_mask = cv2.bitwise_or(combat_mask, color_mask)
 
-        # Vermelho escuro (wrap around 170-180)
-        red_mask2 = cv2.inRange(hsv, np.array([170, 60, 80]), np.array([180, 255, 255]))
+        # === DETECCAO DE CONTORNO RETANGULAR ===
+        # O aro forma um retangulo/quadrado grande na mascara
+        # Sem aro: apenas pixels esparsos das sprites (contornos pequenos)
 
-        # Combina todos os tons avermelhados/alaranjados
-        combat_mask = cv2.bitwise_or(red_mask1, orange_mask)
-        combat_mask = cv2.bitwise_or(combat_mask, red_mask2)
+        # Encontra contornos na mascara
+        contours, _ = cv2.findContours(combat_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        combat_pixels = cv2.countNonZero(combat_mask)
-        combat_percent = (combat_pixels / total_pixels) * 100
+        # Parametros do aro esperado
+        min_contour_area = cfg.get("min_contour_area", 350)  # Area minima do contorno
 
-        # Threshold: > 1% de pixels do aro = em combate
-        return combat_percent > 1.0
+        for contour in contours:
+            area = cv2.contourArea(contour)
+
+            # Aro detectado se houver um contorno grande o suficiente
+            # (area >= 350 pixels indica o quadrado do aro)
+            if area >= min_contour_area:
+                if self.debug:
+                    x, y, cw, ch = cv2.boundingRect(contour)
+                    aspect_ratio = cw / ch if ch > 0 else 0
+                    print(f"[HALO] Aro detectado: area={area:.0f} ratio={aspect_ratio:.2f}")
+                return True
+
+        return False
 
     def read_stats(self, hp_image: np.ndarray, mana_image: np.ndarray,
                    battle_list_image: Optional[np.ndarray] = None) -> Optional[Stats]:
@@ -471,3 +524,282 @@ class OCRReader:
             has_creatures_nearby=has_creatures_nearby,
             in_active_combat=in_active_combat
         )
+
+    def _preprocess_food_timer(self, image: np.ndarray, name: str = "") -> np.ndarray:
+        """
+        Pre-processamento especifico para o food timer (formato MM:SS)
+
+        Args:
+            image: Imagem BGR do food timer
+            name: Nome para debug
+
+        Returns:
+            Imagem processada para OCR
+        """
+        # Converte para HSV
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+
+        # Detecta BRANCO = baixa saturacao + alta luminosidade
+        _, mask_low_sat = cv2.threshold(s, 50, 255, cv2.THRESH_BINARY_INV)
+        _, mask_high_val = cv2.threshold(v, 180, 255, cv2.THRESH_BINARY)
+
+        # Combina mascaras
+        mask = cv2.bitwise_and(mask_low_sat, mask_high_val)
+
+        # Resize 4x
+        scale = 4
+        h, w = mask.shape
+        resized = cv2.resize(mask, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
+
+        # Morfologia
+        kernel = np.ones((2, 2), np.uint8)
+        resized = cv2.morphologyEx(resized, cv2.MORPH_CLOSE, kernel)
+        resized = cv2.morphologyEx(resized, cv2.MORPH_OPEN, kernel)
+
+        # Inverte
+        inverted = cv2.bitwise_not(resized)
+
+        # Auto crop
+        coords = cv2.findNonZero(cv2.bitwise_not(inverted))
+        if coords is not None:
+            x, y, w, h = cv2.boundingRect(coords)
+            margin = 5
+            x = max(0, x - margin)
+            y = max(0, y - margin)
+            w = min(inverted.shape[1] - x, w + 2*margin)
+            h = min(inverted.shape[0] - y, h + 2*margin)
+            cropped = inverted[y:y+h, x:x+w]
+        else:
+            cropped = inverted
+
+        # Padding
+        padded = cv2.copyMakeBorder(cropped, 10, 10, 10, 10,
+                                    cv2.BORDER_CONSTANT, value=255)
+
+        if self.debug and name:
+            cv2.imwrite(f"debug_{name}.png", padded)
+
+        return padded
+
+    def read_food_timer(self, image: np.ndarray) -> Optional[str]:
+        """
+        Le o food timer no formato MM:SS
+
+        Args:
+            image: Imagem da regiao do food timer
+
+        Returns:
+            String no formato "MM:SS" (ex: "05:30") ou None se falhar
+        """
+        if image is None or image.size == 0:
+            return None
+
+        # Preprocessa
+        processed = self._preprocess_food_timer(image, name="food_timer")
+
+        # OCR com whitelist para numeros e ":"
+        config = "--psm 7 -c tessedit_char_whitelist=0123456789:"
+
+        try:
+            text = pytesseract.image_to_string(processed, config=config).strip()
+
+            if self.debug:
+                print(f"[DEBUG] Food timer OCR: '{text}'")
+
+            # Valida formato MM:SS ou M:SS
+            match = re.match(r'^(\d{1,2}):(\d{2})$', text)
+            if match:
+                minutes = match.group(1)
+                seconds = match.group(2)
+                return f"{minutes}:{seconds}"
+
+            # Tenta com PSM 8 se falhar
+            config_psm8 = "--psm 8 -c tessedit_char_whitelist=0123456789:"
+            text = pytesseract.image_to_string(processed, config=config_psm8).strip()
+
+            match = re.match(r'^(\d{1,2}):(\d{2})$', text)
+            if match:
+                minutes = match.group(1)
+                seconds = match.group(2)
+                return f"{minutes}:{seconds}"
+
+        except Exception as e:
+            if self.debug:
+                print(f"[DEBUG] Erro food timer OCR: {e}")
+
+        return None
+
+    def is_food_timer_empty(self, timer: Optional[str]) -> bool:
+        """
+        Verifica se o food timer esta zerado (00:00 ou 0:00)
+
+        Args:
+            timer: String do timer no formato MM:SS
+
+        Returns:
+            True se timer zerado, False caso contrario
+        """
+        if timer is None:
+            return False
+        return timer in ("00:00", "0:00")
+
+    def _preprocess_item_quantity(self, image: np.ndarray, name: str = "") -> np.ndarray:
+        """
+        Pre-processamento para quantidade de item (numero pequeno no canto do slot)
+        Os numeros sao BRANCOS ou AMARELOS em fundo escuro
+
+        Args:
+            image: Imagem BGR do slot/quantidade
+            name: Nome para debug
+
+        Returns:
+            Imagem processada para OCR
+        """
+        # Converte para HSV
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+
+        # Detecta BRANCO (baixa saturacao + alta luminosidade)
+        _, mask_low_sat = cv2.threshold(s, 60, 255, cv2.THRESH_BINARY_INV)
+        _, mask_high_val = cv2.threshold(v, 150, 255, cv2.THRESH_BINARY)
+        white_mask = cv2.bitwise_and(mask_low_sat, mask_high_val)
+
+        # Detecta AMARELO (numeros amarelos quando quantidade baixa)
+        yellow_lower = np.array([20, 100, 150])
+        yellow_upper = np.array([40, 255, 255])
+        yellow_mask = cv2.inRange(hsv, yellow_lower, yellow_upper)
+
+        # Combina branco + amarelo
+        mask = cv2.bitwise_or(white_mask, yellow_mask)
+
+        # Resize 5x para melhor leitura
+        scale = 5
+        h, w = mask.shape
+        resized = cv2.resize(mask, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
+
+        # Morfologia - fecha buracos e remove ruido
+        kernel = np.ones((2, 2), np.uint8)
+        resized = cv2.morphologyEx(resized, cv2.MORPH_CLOSE, kernel, iterations=2)
+        resized = cv2.morphologyEx(resized, cv2.MORPH_OPEN, kernel)
+
+        # Inverte (texto preto em fundo branco)
+        inverted = cv2.bitwise_not(resized)
+
+        # Auto crop
+        coords = cv2.findNonZero(cv2.bitwise_not(inverted))
+        if coords is not None:
+            x, y, w, h = cv2.boundingRect(coords)
+            margin = 8
+            x = max(0, x - margin)
+            y = max(0, y - margin)
+            w = min(inverted.shape[1] - x, w + 2*margin)
+            h = min(inverted.shape[0] - y, h + 2*margin)
+            cropped = inverted[y:y+h, x:x+w]
+        else:
+            cropped = inverted
+
+        # Padding generoso
+        padded = cv2.copyMakeBorder(cropped, 15, 15, 15, 15,
+                                    cv2.BORDER_CONSTANT, value=255)
+
+        if self.debug and name:
+            cv2.imwrite(f"debug_{name}.png", padded)
+
+        return padded
+
+    def read_item_quantity(self, image: np.ndarray) -> int:
+        """
+        Le a quantidade de um item no slot
+
+        Args:
+            image: Imagem da regiao onde aparece a quantidade (canto inferior direito do slot)
+
+        Returns:
+            Quantidade do item (0 se nao conseguir ler ou slot vazio)
+        """
+        if image is None or image.size == 0:
+            return 0
+
+        # Verifica se a imagem e muito escura (slot vazio)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        mean_brightness = np.mean(gray)
+        if mean_brightness < 30:  # Muito escuro = sem item
+            return 0
+
+        # Preprocessa
+        processed = self._preprocess_item_quantity(image, name="item_qty")
+
+        # OCR apenas numeros
+        config = "--psm 7 -c tessedit_char_whitelist=0123456789"
+
+        try:
+            text = pytesseract.image_to_string(processed, config=config).strip()
+
+            if self.debug:
+                print(f"[DEBUG] Item quantity OCR: '{text}'")
+
+            # Tenta extrair numero
+            numbers = re.findall(r'\d+', text)
+            if numbers:
+                qty = int(numbers[0])
+                # Sanidade: quantidade maxima razoavel
+                if 0 < qty <= 10000:
+                    return qty
+
+            # Tenta com PSM 8 (palavra unica)
+            config_psm8 = "--psm 8 -c tessedit_char_whitelist=0123456789"
+            text = pytesseract.image_to_string(processed, config=config_psm8).strip()
+
+            numbers = re.findall(r'\d+', text)
+            if numbers:
+                qty = int(numbers[0])
+                if 0 < qty <= 10000:
+                    return qty
+
+            # Tenta com PSM 10 (caractere unico - para 1 digito)
+            config_psm10 = "--psm 10 -c tessedit_char_whitelist=0123456789"
+            text = pytesseract.image_to_string(processed, config=config_psm10).strip()
+
+            numbers = re.findall(r'\d+', text)
+            if numbers:
+                qty = int(numbers[0])
+                if 0 < qty <= 10000:
+                    return qty
+
+        except Exception as e:
+            if self.debug:
+                print(f"[DEBUG] Erro item quantity OCR: {e}")
+
+        return 0
+
+    def has_item_in_slot(self, image: np.ndarray) -> bool:
+        """
+        Verifica se ha um item no slot (baseado em conteudo visual)
+
+        Args:
+            image: Imagem do slot completo
+
+        Returns:
+            True se ha item visivel no slot
+        """
+        if image is None or image.size == 0:
+            return False
+
+        # Converte para grayscale
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # Calcula variancia - slot vazio tem pouca variacao
+        variance = np.var(gray)
+
+        # Calcula brilho medio
+        mean_brightness = np.mean(gray)
+
+        # Slot com item: maior variancia (detalhes do sprite) e brilho moderado
+        # Slot vazio: baixa variancia (uniforme) e escuro
+        has_item = variance > 100 and mean_brightness > 20
+
+        if self.debug:
+            print(f"[DEBUG] Slot check: variance={variance:.1f}, brightness={mean_brightness:.1f}, has_item={has_item}")
+
+        return has_item

@@ -39,8 +39,9 @@ class MinimapReader:
         self.check_distance = settings.get("check_distance_pixels", 15)
         self.safety_margin = settings.get("safety_margin_pixels", 3)
 
-        # Cores configuráveis (HSV ranges)
+        # Cores configuráveis (BGR exatas com tolerância)
         self.colors = settings.get("colors", {})
+        self.color_tolerance = settings.get("color_tolerance", 3)  # ±3 por padrão
 
         # Cache
         self.last_minimap = None
@@ -79,12 +80,12 @@ class MinimapReader:
             self.logger.error(f"Erro ao capturar minimapa: {e}")
             return None
 
-    def create_color_mask(self, hsv_image: np.ndarray, color_name: str) -> Optional[np.ndarray]:
+    def create_color_mask(self, bgr_image: np.ndarray, color_name: str) -> Optional[np.ndarray]:
         """
-        Cria máscara para uma cor específica
+        Cria máscara para uma cor específica usando cores BGR exatas
 
         Args:
-            hsv_image: Imagem em formato HSV
+            bgr_image: Imagem em formato BGR (direto da captura)
             color_name: Nome da cor ('walkable', 'hole', 'wall')
 
         Returns:
@@ -94,11 +95,26 @@ class MinimapReader:
             return None
 
         color_config = self.colors[color_name]
-        lower = np.array(color_config["hsv_lower"])
-        upper = np.array(color_config["hsv_upper"])
 
-        mask = cv2.inRange(hsv_image, lower, upper)
-        return mask
+        # Suporta novo formato (bgr_colors) e formato antigo (hsv_lower/hsv_upper) para compatibilidade
+        if "bgr_colors" in color_config:
+            # Novo formato: lista de cores BGR exatas
+            mask = np.zeros(bgr_image.shape[:2], dtype=np.uint8)
+            tolerance = self.color_tolerance
+
+            for bgr in color_config["bgr_colors"]:
+                lower = np.array([max(0, c - tolerance) for c in bgr], dtype=np.uint8)
+                upper = np.array([min(255, c + tolerance) for c in bgr], dtype=np.uint8)
+                color_mask = cv2.inRange(bgr_image, lower, upper)
+                mask = cv2.bitwise_or(mask, color_mask)
+
+            return mask
+        else:
+            # Formato antigo: HSV ranges (para compatibilidade)
+            hsv_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2HSV)
+            lower = np.array(color_config["hsv_lower"])
+            upper = np.array(color_config["hsv_upper"])
+            return cv2.inRange(hsv_image, lower, upper)
 
     def is_direction_safe(self, minimap: np.ndarray, direction: str) -> bool:
         """
@@ -112,13 +128,10 @@ class MinimapReader:
             True se direção é segura, False caso contrário
         """
         try:
-            # Converte para HSV
-            hsv = cv2.cvtColor(minimap, cv2.COLOR_BGR2HSV)
-
-            # Cria máscaras para cada tipo de terreno
-            walkable_mask = self.create_color_mask(hsv, "walkable")
-            hole_mask = self.create_color_mask(hsv, "hole")
-            wall_mask = self.create_color_mask(hsv, "wall")
+            # Cria máscaras para cada tipo de terreno (agora usa BGR direto)
+            walkable_mask = self.create_color_mask(minimap, "walkable")
+            hole_mask = self.create_color_mask(minimap, "hole")
+            wall_mask = self.create_color_mask(minimap, "wall")
 
             # Define região a verificar baseado na direção
             check_dist = self.check_distance
@@ -234,11 +247,8 @@ class MinimapReader:
             return []
 
         try:
-            # Converte para HSV
-            hsv = cv2.cvtColor(minimap, cv2.COLOR_BGR2HSV)
-
-            # Cria máscara do chão caminhável
-            walkable_mask = self.create_color_mask(hsv, "walkable")
+            # Cria máscara do chão caminhável (agora usa BGR direto)
+            walkable_mask = self.create_color_mask(minimap, "walkable")
 
             if walkable_mask is None:
                 self.logger.warning("Máscara de chão caminhável não disponível")
@@ -264,12 +274,12 @@ class MinimapReader:
                 )
                 eroded_mask = walkable_mask
 
-            # Cria máscara de PAREDES (preto) para verificação
-            wall_mask = self.create_color_mask(hsv, "wall")
+            # Cria máscara de PAREDES para verificação (agora usa BGR direto)
+            wall_mask = self.create_color_mask(minimap, "wall")
             if wall_mask is None:
                 wall_mask = np.zeros_like(walkable_mask)  # Cria máscara vazia se não configurado
 
-            hole_mask = self.create_color_mask(hsv, "hole")
+            hole_mask = self.create_color_mask(minimap, "hole")
             if hole_mask is None:
                 hole_mask = np.zeros_like(walkable_mask)
 
@@ -438,8 +448,8 @@ class MinimapReader:
             return False
 
     def wait_until_stopped(self, timeout_seconds: float = 30.0,
-                           check_interval_ms: int = 300,
-                           consecutive_checks: int = 5,
+                           check_interval_ms: int = 250,
+                           consecutive_checks: int = 3,
                            interrupt_callback=None) -> bool:
         """
         Aguarda até o player parar de se mover

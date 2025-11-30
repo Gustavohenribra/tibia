@@ -11,10 +11,12 @@ import numpy as np
 from typing import Optional
 from screen_capture_obs import OBSScreenCapture
 from ocr_reader import OCRReader, Stats
+from skill_rotation import Skill
 from skill_rotation import SkillRotation
 from human_behavior import HumanBehavior
 from movement import Movement
 from minimap_reader import MinimapReader
+from potion_monitor import PotionMonitor
 from utils.key_sender import get_key_sender
 from utils.logger import get_logger
 
@@ -24,13 +26,15 @@ class CombatBot:
 
     def __init__(self,
                  settings_path: str = "config/bot_settings.json",
-                 skills_path: str = "config/skills.json"):
+                 skills_path: str = "config/skills.json",
+                 enable_loot: bool = None):
         """
         Inicializa bot
 
         Args:
             settings_path: Caminho para settings
             skills_path: Caminho para skills
+            enable_loot: Sobrescreve config de loot (None usa config do JSON)
         """
         self.logger = get_logger()
         self.logger.info("Inicializando Combat Bot...")
@@ -51,7 +55,19 @@ class CombatBot:
             threshold_max=self.settings["ocr_settings"]["threshold_max"]
         )
 
-        self.rotation = SkillRotation(skills_path)
+        # Monitor de poções (verifica quantidade antes de usar)
+        self.potion_monitor = None
+        if "potion_slots" in self.settings and self.settings["potion_slots"]:
+            self.potion_monitor = PotionMonitor(
+                self.screen_capture,
+                self.ocr_reader,
+                settings_path
+            )
+            self.logger.info(f"🧪 Monitor de poções: ATIVADO ({len(self.settings['potion_slots'])} slots)")
+        else:
+            self.logger.info("🧪 Monitor de poções: DESATIVADO (configure com tools/calibrate_potion_slots.py)")
+
+        self.rotation = SkillRotation(skills_path, potion_monitor=self.potion_monitor)
 
         self.behavior = HumanBehavior(
             base_delay_ms=self.settings["human_behavior"]["base_delay_ms"],
@@ -95,7 +111,11 @@ class CombatBot:
         self.chase_enabled = self.settings.get("combat", {}).get("enable_chase", True)
         self.chase_key = self.settings.get("combat", {}).get("chase_key", "k")
         self.chase_on_combat = self.settings.get("combat", {}).get("chase_on_combat", True)
-        self.auto_loot_enabled = self.settings.get("combat", {}).get("enable_auto_loot", True)
+        # Loot: usa parâmetro se fornecido, senão usa config
+        if enable_loot is not None:
+            self.auto_loot_enabled = enable_loot
+        else:
+            self.auto_loot_enabled = self.settings.get("combat", {}).get("enable_auto_loot", True)
         self.loot_key = self.settings.get("combat", {}).get("loot_key", "alt+q")
         self.loot_delay_ms = self.settings.get("combat", {}).get("loot_delay_after_kill_ms", 500)
 
@@ -136,6 +156,19 @@ class CombatBot:
         self.last_combat_time = time.time()
         self.in_combat_state = False
         self.last_auto_target_time = 0  # Para controle de cooldown
+
+        # Debounce para saída de combate (evita loot/target quando aro some por 1 frame)
+        self.combat_exit_debounce_frames = 2  # Precisa de 2 frames sem aro para confirmar saída
+        self.frames_without_combat = 0  # Contador de frames consecutivos sem aro
+
+        # Limite de tentativas de auto-target (evita spam quando detecção falha)
+        self.auto_target_attempts = 0
+        self.max_auto_target_attempts = 3  # Máximo 3 tentativas antes de pausar
+
+        # Anti-spam: verificação de efeito de skills (poções/healing)
+        self.pending_skill_verification = None  # Skill aguardando verificação
+        self.pending_skill_verification_time = 0  # Quando foi usada
+        self.skill_verification_delay = 1.0  # Segundos para aguardar antes de verificar
 
         # Movimentos aleatórios durante combate
         random_move_cfg = self.settings.get("combat", {}).get("random_movement_in_combat", {})
@@ -254,8 +287,20 @@ class CombatBot:
 
         return stats
 
-    def execute_skill(self, skill):
-        """Executa uma skill"""
+    def execute_skill(self, skill, stats: Optional[Stats] = None):
+        """
+        Executa uma skill
+
+        Args:
+            skill: Skill a executar
+            stats: Stats atuais (para verificação de efeito anti-spam)
+        """
+        # Anti-spam: salva HP/Mana antes para verificar efeito depois
+        if stats and skill.skill_type in ["healing", "mana"]:
+            self.rotation.prepare_skill_use(skill, stats)
+            self.pending_skill_verification = skill
+            self.pending_skill_verification_time = time.time()
+
         # Delay antes
         self.behavior.wait_before_action()
 
@@ -271,6 +316,36 @@ class CombatBot:
 
         # Delay após
         self.behavior.wait_after_action()
+
+    def verify_pending_skill_effect(self, stats: Stats):
+        """
+        Verifica se skill pendente teve efeito (anti-spam)
+        Chamado a cada ciclo do loop principal
+        """
+        if self.pending_skill_verification is None:
+            return
+
+        # Aguarda delay antes de verificar
+        time_since_use = time.time() - self.pending_skill_verification_time
+        if time_since_use < self.skill_verification_delay:
+            return
+
+        # Verifica efeito
+        skill = self.pending_skill_verification
+        had_effect = self.rotation.verify_skill_effect(skill, stats)
+
+        if not had_effect:
+            self.logger.warning(
+                f"⚠️  {skill.name}: Sem efeito detectado! "
+                f"(tentativa {skill.failed_attempts}/{skill.max_failed_attempts})"
+            )
+            if skill.is_blocked():
+                self.logger.warning(
+                    f"🚫 {skill.name}: BLOQUEADA por {skill.block_duration}s (sem poção/mana?)"
+                )
+
+        # Limpa pendência
+        self.pending_skill_verification = None
 
     def try_auto_target(self):
         """Tenta selecionar próximo alvo automaticamente"""
@@ -385,19 +460,10 @@ class CombatBot:
         delay = self.loot_delay_ms / 1000.0
         time.sleep(delay)
 
-        # Pressiona tecla de loot MÚLTIPLAS VEZES para garantir que seja recebida
-        # (Tibia às vezes perde teclas se enviadas muito rápido)
-        success_count = 0
-        for attempt in range(3):
-            success = self.key_sender.press_key(self.loot_key)
-            if success:
-                success_count += 1
+        # Pressiona tecla de loot uma única vez
+        success = self.key_sender.press_key(self.loot_key)
 
-            # Pequeno delay entre tentativas (150ms)
-            if attempt < 2:  # Não dá delay após a última
-                time.sleep(0.15)
-
-        if success_count > 0:
+        if success:
             self.logger.info(f"💰 Loot executado")
         else:
             self.logger.error(f"❌ Falha ao enviar loot")
@@ -462,6 +528,9 @@ class CombatBot:
                 # Adiciona ao histórico
                 self.stats_history.append(stats)
 
+                # Anti-spam: verifica efeito de skill pendente
+                self.verify_pending_skill_effect(stats)
+
                 # Log de stats a cada 3 segundos (apenas se bot estiver enabled)
                 if self.enabled:
                     current_time = time.time()
@@ -478,21 +547,38 @@ class CombatBot:
                             f"{combat_status} | HP: {stats.hp_current}/{stats.hp_max} ({stats.hp_percent:.0f}%) | "
                             f"Mana: {stats.mana_current}/{stats.mana_max} ({stats.mana_percent:.0f}%)"
                         )
+
+                        # Log de skills bloqueadas (anti-spam)
+                        blocked_skills = self.rotation.get_blocked_skills_info()
+                        if blocked_skills:
+                            for blocked_info in blocked_skills:
+                                self.logger.warning(f"🚫 SKILL BLOQUEADA: {blocked_info}")
+
                         last_log_time = current_time
 
-                    # Log quando estado de combate muda
-                    if stats.in_active_combat != last_target_state:
-                        if stats.in_active_combat:
+                    # Controle de combate com DEBOUNCE (evita falsos positivos)
+                    if stats.in_active_combat:
+                        # Em combate: reseta contador e atualiza estado
+                        self.frames_without_combat = 0
+
+                        if not last_target_state:
+                            # Acabou de entrar em combate
                             self.logger.info("⚔️  Entrando em combate ativo!")
 
-                            # Ativa chase ao entrar em combate (verifica visualmente se já está ativo)
+                            # Ativa chase ao entrar em combate
                             if self.chase_on_combat:
                                 self.ensure_chase_active()
 
                             # Atualiza tempo de combate
                             self.last_combat_time = time.time()
+                            last_target_state = True
 
-                        else:
+                    else:
+                        # Sem aro de combate: incrementa contador
+                        self.frames_without_combat += 1
+
+                        # Só considera "saiu de combate" após N frames consecutivos sem aro
+                        if last_target_state and self.frames_without_combat >= self.combat_exit_debounce_frames:
                             if stats.has_creatures_nearby:
                                 self.logger.info("🟡 Saiu de combate (criaturas ainda próximas)")
                             else:
@@ -501,8 +587,21 @@ class CombatBot:
                             # Sequência após matar: Loot → Auto-target
                             self.auto_loot()
                             self.try_auto_target()
+                            self.last_auto_target_time = time.time()
 
-                        last_target_state = stats.in_active_combat
+                            # IMPORTANTE: Aguarda e verifica novamente se há criaturas
+                            # Isso evita mover quando ainda há monstros para atacar
+                            time.sleep(0.15)  # Pequeno delay para processar auto-target
+                            recheck_stats = self.get_stats()
+                            if recheck_stats and (recheck_stats.has_creatures_nearby or recheck_stats.in_active_combat):
+                                self.logger.info("🎯 Criaturas detectadas após auto-target, aguardando...")
+                                self.last_combat_time = time.time()  # Reseta timer de combate
+                                # Não marca last_target_state como False ainda
+                                if recheck_stats.in_active_combat:
+                                    last_target_state = True
+                                    continue  # Volta ao início do loop para processar combate
+
+                            last_target_state = False
 
                     # Atualiza tempo de combate se estiver em combate
                     if stats.in_active_combat or stats.has_creatures_nearby:
@@ -525,14 +624,21 @@ class CombatBot:
                             self.try_random_movement_in_combat()
 
                     # HUNT AUTOMÁTICA: Tenta atacar se tem criaturas perto mas não está em combate
+                    # IMPORTANTE: Só tenta se realmente saiu de combate (debounce confirmado)
                     if self.enabled and not self.paused:
-                        if stats.has_creatures_nearby and not stats.in_active_combat:
-                            # Cooldown de 0.5s entre tentativas (evita spam)
-                            time_since_last_target = time.time() - self.last_auto_target_time
-                            if time_since_last_target >= 0.5:
-                                self.logger.debug("🎯 Criaturas detectadas, tentando atacar...")
-                                self.try_auto_target()
-                                self.last_auto_target_time = time.time()
+                        if stats.has_creatures_nearby and not stats.in_active_combat and not last_target_state:
+                            # Limite de tentativas (evita spam quando detecção de aro falha)
+                            if self.auto_target_attempts < self.max_auto_target_attempts:
+                                # Cooldown de 1s entre tentativas
+                                time_since_last_target = time.time() - self.last_auto_target_time
+                                if time_since_last_target >= 1.0:
+                                    self.logger.debug(f"🎯 Tentativa {self.auto_target_attempts + 1}/{self.max_auto_target_attempts}")
+                                    self.try_auto_target()
+                                    self.last_auto_target_time = time.time()
+                                    self.auto_target_attempts += 1
+                        elif stats.in_active_combat:
+                            # Resetar contador quando entrar em combate
+                            self.auto_target_attempts = 0
 
                     # Movimento aleatório quando sem criaturas (apenas se bot enabled e não pausado)
                     if self.enabled and not self.paused and not stats.has_creatures_nearby:
@@ -584,7 +690,7 @@ class CombatBot:
 
                         if should_execute:
                             skill_icon = "⚔️" if skill.skill_type == "damage" else "💊"
-                            self.execute_skill(skill)
+                            self.execute_skill(skill, stats)  # Passa stats para anti-spam
                             self.logger.info(f"{skill_icon} Skill: {skill.name} ({skill.hotkey})")
 
                 # Mantém FPS

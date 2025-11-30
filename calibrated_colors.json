@@ -2,44 +2,39 @@
   "minimap": {
     "colors": {
       "walkable": {
-        "name": "walkable",
-        "hsv_lower": [
-          5,
-          134,
-          118
-        ],
-        "hsv_upper": [
-          25,
-          194,
-          178
+        "bgr_colors": [
+          [
+            53,
+            101,
+            148
+          ]
         ]
       },
       "wall": {
-        "name": "wall",
-        "hsv_lower": [
-          0,
-          221,
-          114
-        ],
-        "hsv_upper": [
-          19,
-          255,
-          174
-        ]
-      },
-      "hole": {
-        "name": "hole",
-        "hsv_lower": [
-          13,
-          65,
-          225
-        ],
-        "hsv_upper": [
-          33,
-          125,
-          255
+        "bgr_colors": [
+          [
+            6,
+            47,
+            134
+          ],
+          [
+            4,
+            45,
+            139
+          ],
+          [
+            10,
+            47,
+            134
+          ],
+          [
+            2,
+            43,
+            144
+          ]
         ]
       }
-    }
+    },
+    "color_tolerance": 3
   }
 }

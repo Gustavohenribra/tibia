@@ -11,7 +11,8 @@
       "WebSearch",
       "Bash(py .srcutilsmouse_sender_postmessage.py)",
       "Bash(py src/utils/mouse_sender_postmessage.py)",
-      "Bash(py test_postmessage_debug.py)"
+      "Bash(py test_postmessage_debug.py)",
+      "Bash(py tools/extract_halo_colors.py:*)"
     ],
     "deny": [],
     "ask": []

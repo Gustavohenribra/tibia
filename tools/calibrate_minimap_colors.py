@@ -1,6 +1,6 @@
 """
 Ferramenta de Calibração de Cores do Minimapa
-Permite selecionar cores interativamente para gerar HSV ranges precisos
+Permite selecionar cores interativamente - usa cores BGR EXATAS (sem HSV)
 """
 
 import cv2
@@ -44,12 +44,15 @@ class MinimapColorCalibrator:
         self.minimap_width = minimap_config["region"]["width"]
         self.minimap_height = minimap_config["region"]["height"]
 
-        # Armazenamento de cores selecionadas
+        # Armazenamento de cores BGR selecionadas (set para evitar duplicatas)
         self.selected_colors = {
-            "walkable": [],
-            "wall": [],
-            "hole": []
+            "walkable": set(),
+            "wall": set(),
+            "hole": set()
         }
+
+        # Tolerância para detecção (±3 por padrão)
+        self.color_tolerance = 3
 
         self.current_mode = "walkable"  # Modo atual de seleção
         self.minimap_img = None
@@ -92,20 +95,13 @@ class MinimapColorCalibrator:
                 return
 
             # Pega cor BGR do pixel clicado (usando coordenadas originais)
-            bgr_color = self.minimap_img[original_y, original_x]
+            bgr_color = tuple(self.minimap_img[original_y, original_x].tolist())
 
-            # Converte para HSV
-            hsv_pixel = cv2.cvtColor(
-                np.uint8([[bgr_color]]),
-                cv2.COLOR_BGR2HSV
-            )[0][0]
-
-            # Adiciona à lista do modo atual
-            self.selected_colors[self.current_mode].append(hsv_pixel)
+            # Adiciona ao set do modo atual (BGR exato, sem conversão HSV)
+            self.selected_colors[self.current_mode].add(bgr_color)
 
             self.logger.info(
-                f"✅ [{self.current_mode.upper()}] Cor selecionada em ({original_x}, {original_y}): "
-                f"BGR={bgr_color} → HSV={hsv_pixel}"
+                f"✅ [{self.current_mode.upper()}] Cor BGR selecionada em ({original_x}, {original_y}): {bgr_color}"
             )
 
             # Atualiza display
@@ -120,97 +116,52 @@ class MinimapColorCalibrator:
         self.display_img = self.minimap_img.copy()
 
         # Desenha marcadores para cada cor selecionada
-        colors_bgr = {
+        marker_colors = {
             "walkable": (0, 255, 0),      # Verde
             "wall": (0, 0, 255),          # Vermelho
             "hole": (0, 255, 255)         # Amarelo
         }
 
-        for mode, hsv_colors in self.selected_colors.items():
-            if not hsv_colors:
+        for mode, bgr_colors in self.selected_colors.items():
+            if not bgr_colors:
                 continue
 
-            bgr_color = colors_bgr[mode]
+            marker_color = marker_colors[mode]
+            tolerance = self.color_tolerance
 
-            # Marca cada pixel selecionado com círculo
-            for hsv in hsv_colors:
-                # Encontra pixel correspondente (busca aproximada)
-                hsv_img = cv2.cvtColor(self.minimap_img, cv2.COLOR_BGR2HSV)
-
-                # Cria máscara para cor similar (tolerância pequena)
-                lower = np.array([max(0, hsv[0]-2), max(0, hsv[1]-20), max(0, hsv[2]-20)])
-                upper = np.array([min(180, hsv[0]+2), min(255, hsv[1]+20), min(255, hsv[2]+20)])
-                mask = cv2.inRange(hsv_img, lower, upper)
+            # Para cada cor BGR selecionada, cria máscara e desenha contornos
+            for bgr in bgr_colors:
+                lower = np.array([max(0, c - tolerance) for c in bgr], dtype=np.uint8)
+                upper = np.array([min(255, c + tolerance) for c in bgr], dtype=np.uint8)
+                mask = cv2.inRange(self.minimap_img, lower, upper)
 
                 # Encontra contornos
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
                 # Desenha contornos
-                cv2.drawContours(self.display_img, contours, -1, bgr_color, 1)
-
-    def calculate_hsv_range(self, hsv_colors: list) -> dict:
-        """
-        Calcula range HSV a partir de múltiplas amostras
-
-        Args:
-            hsv_colors: Lista de cores HSV selecionadas
-
-        Returns:
-            Dict com hsv_lower e hsv_upper
-        """
-        if not hsv_colors:
-            return None
-
-        # Converte para numpy array
-        colors_array = np.array(hsv_colors)
-
-        # Calcula mínimo e máximo para cada canal
-        h_values = colors_array[:, 0]
-        s_values = colors_array[:, 1]
-        v_values = colors_array[:, 2]
-
-        # Range com margem de segurança
-        h_margin = 10
-        s_margin = 30
-        v_margin = 30
-
-        hsv_lower = [
-            int(max(0, h_values.min() - h_margin)),
-            int(max(0, s_values.min() - s_margin)),
-            int(max(0, v_values.min() - v_margin))
-        ]
-
-        hsv_upper = [
-            int(min(180, h_values.max() + h_margin)),
-            int(min(255, s_values.max() + s_margin)),
-            int(min(255, v_values.max() + v_margin))
-        ]
-
-        return {
-            "hsv_lower": hsv_lower,
-            "hsv_upper": hsv_upper
-        }
+                cv2.drawContours(self.display_img, contours, -1, marker_color, 1)
 
     def generate_masks(self):
-        """Gera e exibe máscaras para cada tipo de terreno"""
+        """Gera e exibe máscaras para cada tipo de terreno (usa BGR exato)"""
         if self.minimap_img is None:
             return
 
-        hsv_img = cv2.cvtColor(self.minimap_img, cv2.COLOR_BGR2HSV)
-
         masks = {}
-        for mode, hsv_colors in self.selected_colors.items():
-            if not hsv_colors:
+        tolerance = self.color_tolerance
+
+        for mode, bgr_colors in self.selected_colors.items():
+            if not bgr_colors:
                 continue
 
-            hsv_range = self.calculate_hsv_range(hsv_colors)
-            if hsv_range is None:
-                continue
+            # Cria máscara combinando todas as cores BGR selecionadas
+            mask = np.zeros(self.minimap_img.shape[:2], dtype=np.uint8)
 
-            lower = np.array(hsv_range["hsv_lower"])
-            upper = np.array(hsv_range["hsv_upper"])
+            for bgr in bgr_colors:
+                lower = np.array([max(0, c - tolerance) for c in bgr], dtype=np.uint8)
+                upper = np.array([min(255, c + tolerance) for c in bgr], dtype=np.uint8)
+                color_mask = cv2.inRange(self.minimap_img, lower, upper)
+                mask = cv2.bitwise_or(mask, color_mask)
 
-            mask = cv2.inRange(hsv_img, lower, upper)
             masks[mode] = mask
 
             # Salva máscara
@@ -238,31 +189,29 @@ class MinimapColorCalibrator:
             cv2.imshow("Máscaras Combinadas", combined)
 
     def save_config(self):
-        """Salva configuração HSV em formato JSON"""
+        """Salva configuração BGR exata em formato JSON"""
         config = {
             "minimap": {
-                "colors": {}
+                "colors": {},
+                "color_tolerance": self.color_tolerance
             }
         }
 
-        for mode, hsv_colors in self.selected_colors.items():
-            if not hsv_colors:
+        for mode, bgr_colors in self.selected_colors.items():
+            if not bgr_colors:
                 self.logger.warning(f"⚠️  Nenhuma cor selecionada para '{mode}'")
                 continue
 
-            hsv_range = self.calculate_hsv_range(hsv_colors)
+            # Converte set para lista de listas (JSON serializable)
+            colors_list = [list(bgr) for bgr in bgr_colors]
 
-            if hsv_range:
-                config["minimap"]["colors"][mode] = {
-                    "name": mode,
-                    "hsv_lower": hsv_range["hsv_lower"],
-                    "hsv_upper": hsv_range["hsv_upper"]
-                }
+            config["minimap"]["colors"][mode] = {
+                "bgr_colors": colors_list
+            }
 
-                self.logger.info(
-                    f"📋 [{mode.upper()}] HSV range: "
-                    f"lower={hsv_range['hsv_lower']}, upper={hsv_range['hsv_upper']}"
-                )
+            self.logger.info(
+                f"📋 [{mode.upper()}] {len(colors_list)} cor(es) BGR: {colors_list}"
+            )
 
         # Salva em arquivo
         output_file = "calibrated_colors.json"
@@ -270,18 +219,20 @@ class MinimapColorCalibrator:
             json.dump(config, f, indent=2)
 
         self.logger.info(f"✅ Configuração salva em {output_file}")
-        self.logger.info("   Copie os valores de 'colors' para bot_settings.json > minimap > colors")
+        self.logger.info(f"   Tolerância: ±{self.color_tolerance}")
+        self.logger.info("   Copie os valores para bot_settings.json > minimap > colors")
 
     def run(self):
         """Loop principal de calibração"""
         self.logger.info("\n" + "="*60)
-        self.logger.info("🎨 FERRAMENTA DE CALIBRAÇÃO DE CORES DO MINIMAPA")
+        self.logger.info("🎨 CALIBRAÇÃO DE CORES DO MINIMAPA (BGR EXATO)")
         self.logger.info("="*60)
+        self.logger.info(f"\n   Sistema simplificado: cores BGR exatas com tolerância ±{self.color_tolerance}")
         self.logger.info("\nInstruções:")
         self.logger.info("  1️⃣  Pressione '1' = Modo WALKABLE (chão caminhável - verde)")
         self.logger.info("  2️⃣  Pressione '2' = Modo WALL (parede - vermelho)")
         self.logger.info("  3️⃣  Pressione '3' = Modo HOLE (buraco/escada - amarelo)")
-        self.logger.info("  🖱️  Click nos pixels para selecionar cores")
+        self.logger.info("  🖱️  Click nos pixels para selecionar cores BGR")
         self.logger.info("  🔄 Pressione 'r' = Atualizar captura do minimapa")
         self.logger.info("  👁️  Pressione 'm' = Gerar e visualizar máscaras")
         self.logger.info("  💾 Pressione 's' = Salvar configuração")

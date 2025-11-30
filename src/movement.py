@@ -113,11 +113,11 @@ class Movement:
 
         # Cooldown mínimo entre movimentos
         time_since_last_move = time.time() - self.last_movement_time
-        if time_since_last_move < 0.5:  # Mínimo 0.5 segundos entre ciclos
+        if time_since_last_move < 0.3:  # Mínimo 0.3 segundos entre ciclos
             return False
 
         # Move se passou tempo configurado sem combate
-        min_time_without_combat = 2.0
+        min_time_without_combat = 0.8  # Tempo mínimo sem combate antes de mover
         return time_since_last_combat >= min_time_without_combat
 
     def walk_to_edge(self, max_stuck_retries: int = 2) -> bool:

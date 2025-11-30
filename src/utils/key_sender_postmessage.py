@@ -107,35 +107,103 @@ class KeySenderPostMessage:
         self.keys_sent = 0
         self.keys_failed = 0
 
+        # Controle de reconexão automática
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 2  # Reconecta após 2 falhas seguidas
+
         # Encontra janela do Tibia
         self.hwnd = None
         self._find_window()
 
+    def _get_process_name(self, pid: int) -> str:
+        """Obtém o nome do processo pelo PID"""
+        try:
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if handle:
+                try:
+                    # Tenta obter nome do executável
+                    buffer = ctypes.create_unicode_buffer(260)
+                    size = wintypes.DWORD(260)
+                    kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size))
+                    full_path = buffer.value
+                    # Extrai apenas o nome do arquivo
+                    if full_path:
+                        return full_path.split('\\')[-1].lower()
+                finally:
+                    kernel32.CloseHandle(handle)
+        except:
+            pass
+        return ""
+
     def _find_window(self):
-        """Encontra a janela do Tibia"""
-        # Tenta encontrar janela exata
-        self.hwnd = self.user32.FindWindowW(None, self.window_title)
+        """Encontra a janela do Tibia (verifica processo para evitar falsos positivos)"""
+        self.hwnd = None
 
-        if not self.hwnd:
-            # Tenta encontrar janela que contenha "Tibia" no título
-            enum_windows_proc = ctypes.WINFUNCTYPE(
-                wintypes.BOOL,
-                wintypes.HWND,
-                wintypes.LPARAM
-            )
+        # Lista de processos válidos do Tibia
+        valid_processes = ['tibia.exe', 'client.exe']
 
-            def callback(hwnd, lParam):
-                length = self.user32.GetWindowTextLengthW(hwnd)
-                if length > 0:
-                    buffer = ctypes.create_unicode_buffer(length + 1)
-                    self.user32.GetWindowTextW(hwnd, buffer, length + 1)
-                    title = buffer.value
-                    if self.window_title.lower() in title.lower():
-                        self.hwnd = hwnd
-                        return False  # Para a enumeração
+        # Lista de classes de janela a IGNORAR (não são o jogo)
+        invalid_classes = ['chrome_widgetwin_1', 'mozillawindowclass', 'operawindowclass']
+
+        enum_windows_proc = ctypes.WINFUNCTYPE(
+            wintypes.BOOL,
+            wintypes.HWND,
+            wintypes.LPARAM
+        )
+
+        candidates = []  # Lista de candidatos (hwnd, title, is_exact_match, is_valid_process)
+
+        def callback(hwnd, lParam):
+            # Apenas janelas visíveis
+            if not self.user32.IsWindowVisible(hwnd):
                 return True
 
-            self.user32.EnumWindows(enum_windows_proc(callback), 0)
+            length = self.user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buffer = ctypes.create_unicode_buffer(length + 1)
+                self.user32.GetWindowTextW(hwnd, buffer, length + 1)
+                title = buffer.value
+
+                # Verifica se título contém "Tibia"
+                if self.window_title.lower() in title.lower():
+                    # Obtém classe da janela
+                    class_buffer = ctypes.create_unicode_buffer(256)
+                    self.user32.GetClassNameW(hwnd, class_buffer, 256)
+                    class_name = class_buffer.value.lower()
+
+                    # IGNORA janelas de navegadores/editores
+                    if class_name in invalid_classes:
+                        return True
+
+                    # Obtém PID e nome do processo
+                    pid = wintypes.DWORD()
+                    self.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                    process_name = self._get_process_name(pid.value)
+
+                    is_exact = (title.lower() == self.window_title.lower())
+                    is_valid_process = (process_name in valid_processes)
+
+                    candidates.append((hwnd, title, is_exact, is_valid_process, class_name, process_name))
+            return True
+
+        self.user32.EnumWindows(enum_windows_proc(callback), 0)
+
+        # Prioriza: 1) Processo válido + título exato, 2) Processo válido, 3) Título exato, 4) Qualquer
+        candidates.sort(key=lambda x: (not x[3], not x[2]))  # is_valid_process DESC, is_exact DESC
+
+        if candidates:
+            best = candidates[0]
+            self.hwnd = best[0]
+
+            if self.debug:
+                print(f"[PostMessage] 🔍 {len(candidates)} janela(s) candidata(s) encontrada(s)")
+                for i, (h, t, exact, valid_proc, cls, proc) in enumerate(candidates):
+                    marker = "→" if h == self.hwnd else " "
+                    proc_status = "✅" if valid_proc else "⚠️"
+                    print(f"    {marker} [{i+1}] {proc_status} '{t}' (classe={cls}, processo={proc})")
 
         if self.debug:
             if self.hwnd:
@@ -157,6 +225,36 @@ class KeySenderPostMessage:
                 print(f"    PID: {pid.value}")
             else:
                 print(f"[PostMessage] ⚠️  Janela '{self.window_title}' NÃO encontrada. Teclas podem falhar.")
+
+    def is_hwnd_valid(self) -> bool:
+        """
+        Verifica se o handle da janela ainda é válido.
+        Usa a API IsWindow() do Windows para verificar.
+
+        Returns:
+            True se o handle é válido, False caso contrário
+        """
+        if not self.hwnd:
+            return False
+        return self.user32.IsWindow(self.hwnd) != 0
+
+    def _reconnect_window(self) -> bool:
+        """
+        Tenta reconectar à janela do Tibia.
+
+        Returns:
+            True se reconectou com sucesso, False caso contrário
+        """
+        old_hwnd = self.hwnd
+        self._find_window()
+
+        if self.hwnd:
+            if old_hwnd != self.hwnd:
+                print(f"[PostMessage] 🔄 RECONEXÃO: HWND antigo={old_hwnd} -> novo={self.hwnd}")
+            return True
+        else:
+            print(f"[PostMessage] ❌ RECONEXÃO FALHOU: Janela '{self.window_title}' não encontrada!")
+            return False
 
     def _make_lparam(self, scan_code: int, is_keyup: bool = False, is_extended_key: bool = False) -> int:
         """
@@ -224,12 +322,11 @@ class KeySenderPostMessage:
         # Verifica se é extended key (setas, delete, insert, etc)
         is_extended = key.upper() in EXTENDED_KEYS
 
-        # Verifica se janela existe
-        if not self.hwnd:
-            self._find_window()
-            if not self.hwnd:
-                if self.debug:
-                    print(f"[PostMessage] ❌ Janela '{self.window_title}' não encontrada!")
+        # VALIDAÇÃO DE HWND: Verifica se handle ainda é válido (não apenas se existe)
+        if not self.is_hwnd_valid():
+            if self.debug:
+                print(f"[PostMessage] ⚠️ HWND inválido detectado, tentando reconectar...")
+            if not self._reconnect_window():
                 self.keys_failed += 1
                 return False
 
@@ -266,8 +363,15 @@ class KeySenderPostMessage:
             success = result_down and result_up
             if success:
                 self.keys_sent += 1
+                self._consecutive_failures = 0  # Reset contador de falhas
             else:
                 self.keys_failed += 1
+                self._consecutive_failures += 1
+                # AUTO-RECUPERAÇÃO: Se falhou múltiplas vezes seguidas, tenta reconectar
+                if self._consecutive_failures >= self._max_consecutive_failures:
+                    print(f"[PostMessage] ⚠️ {self._consecutive_failures} falhas consecutivas detectadas, tentando reconectar...")
+                    self._reconnect_window()
+                    self._consecutive_failures = 0
 
             if self.debug:
                 status = "✅ SUCESSO" if success else "❌ FALHOU"
@@ -277,6 +381,11 @@ class KeySenderPostMessage:
 
         except Exception as e:
             self.keys_failed += 1
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._max_consecutive_failures:
+                print(f"[PostMessage] ⚠️ {self._consecutive_failures} falhas consecutivas (exceção), tentando reconectar...")
+                self._reconnect_window()
+                self._consecutive_failures = 0
             if self.debug:
                 print(f"[PostMessage] ❌ ERRO - {e}\n")
             return False
@@ -326,12 +435,11 @@ class KeySenderPostMessage:
         # Verifica se tecla principal é extended
         main_is_extended = main_key in EXTENDED_KEYS
 
-        # Verifica se janela existe
-        if not self.hwnd:
-            self._find_window()
-            if not self.hwnd:
-                if self.debug:
-                    print(f"[PostMessage] ❌ Janela '{self.window_title}' não encontrada!")
+        # VALIDAÇÃO DE HWND: Verifica se handle ainda é válido (não apenas se existe)
+        if not self.is_hwnd_valid():
+            if self.debug:
+                print(f"[PostMessage] ⚠️ HWND inválido detectado, tentando reconectar...")
+            if not self._reconnect_window():
                 self.keys_failed += 1
                 return False
 
@@ -392,8 +500,15 @@ class KeySenderPostMessage:
 
             if all_success:
                 self.keys_sent += 1
+                self._consecutive_failures = 0  # Reset contador de falhas
             else:
                 self.keys_failed += 1
+                self._consecutive_failures += 1
+                # AUTO-RECUPERAÇÃO: Se falhou múltiplas vezes seguidas, tenta reconectar
+                if self._consecutive_failures >= self._max_consecutive_failures:
+                    print(f"[PostMessage] ⚠️ {self._consecutive_failures} falhas consecutivas detectadas, tentando reconectar...")
+                    self._reconnect_window()
+                    self._consecutive_failures = 0
 
             if self.debug:
                 status = "✅ SUCESSO" if all_success else "❌ FALHOU"
@@ -403,6 +518,11 @@ class KeySenderPostMessage:
 
         except Exception as e:
             self.keys_failed += 1
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._max_consecutive_failures:
+                print(f"[PostMessage] ⚠️ {self._consecutive_failures} falhas consecutivas (exceção), tentando reconectar...")
+                self._reconnect_window()
+                self._consecutive_failures = 0
             if self.debug:
                 print(f"[PostMessage] ❌ ERRO - {e}\n")
             return False

@@ -44,11 +44,23 @@ def main():
     logger.info("  3. Configurações em config/ estão corretas")
     logger.info("")
 
+    # Pergunta sobre loot
+    while True:
+        loot_input = input("Deseja ativar loot automático? (s/n): ").strip().lower()
+        if loot_input in ['s', 'n']:
+            break
+        print("Por favor, digite 's' para sim ou 'n' para não.")
+
+    enable_loot = loot_input == 's'
+    logger.info(f"💰 Loot automático: {'ATIVADO' if enable_loot else 'DESATIVADO'}")
+    print("")
+
     try:
         # Inicializa bot
         bot = CombatBot(
             settings_path="config/bot_settings.json",
-            skills_path="config/skills.json"
+            skills_path="config/skills.json",
+            enable_loot=enable_loot
         )
 
         # Inicia

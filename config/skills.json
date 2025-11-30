@@ -5,37 +5,37 @@
   "skills": [
     {
       "name": "Health Potion (Emergency)",
-      "hotkey": "F1",
+      "hotkey": "1",
       "priority": 250,
       "cooldown": 1.5,
       "type": "healing",
       "conditions": {
-        "max_hp_percent": 40,
-        "description": "Usa quando HP < 40%"
+        "max_hp_percent": 55,
+        "description": "Usa quando HP < 55%"
       }
     },
     {
-      "name": "Exura infir ico",
-      "hotkey": "F3",
+      "name": "Exura ico",
+      "hotkey": "8",
       "priority": 200,
       "cooldown": 1.5,
       "mana_cost": 10,
       "type": "healing",
       "conditions": {
-        "max_hp_percent": 80,
+        "max_hp_percent": 70,
         "min_mana": 40,
-        "description": "Healing spell quando HP < 80% e tem mana"
+        "description": "Healing spell quando HP < 60% e tem mana"
       }
     },
     {
       "name": "Mana Potion",
-      "hotkey": "F2",
+      "hotkey": "2",
       "priority": 150,
       "cooldown": 1.5,
       "type": "mana",
       "conditions": {
-        "max_mana_percent": 30,
-        "description": "Usa quando Mana < 30%"
+        "max_mana_percent": 40,
+        "description": "Usa quando Mana < 40%"
       }
     }
   ],
@@ -48,5 +48,18 @@
     "enable_auto_mana": true,
     "enable_auto_buffs": true,
     "pause_rotation_when_hp_below": 30
+  },
+
+  "_anti_spam_info": {
+    "_description": "Sistema anti-spam para evitar detecção quando não tem poção/mana",
+    "_how_it_works": [
+      "Após usar uma poção/spell, verifica se HP/Mana subiu",
+      "Se não subiu após 3 tentativas consecutivas, bloqueia a skill por 30s",
+      "Isso evita spam de teclas quando você fica sem poção ou mana"
+    ],
+    "_configurable_per_skill": [
+      "max_failed_attempts: Máximo de tentativas antes de bloquear (padrão: 3)",
+      "block_duration: Duração do bloqueio em segundos (padrão: 30)"
+    ]
   }
 }
